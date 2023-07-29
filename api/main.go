@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/pnnguyen58/go-temporal/config"
+	"github.com/pnnguyen58/go-temporal/core/app"
 	"github.com/pnnguyen58/go-temporal/infra"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -32,23 +33,25 @@ func main() {
 	}()
 
 
-	app := fx.New(
+	ap := fx.New(
 		fx.Provide(
-			config.LoadLoggerConfig,
 			infra.NewLogger,
+			infra.NewTemporalClient,
 			context.TODO,
 			// TODO add all providers
+			app.NewExampleApp,
+			config.LoadTempoConfig,
 		),
 		fx.Invoke(
 			listenAndServe,
 		),
 	)
-	if err := app.Start(ctx); err != nil {
+	if err := ap.Start(ctx); err != nil {
 		os.Exit(1)
 	}
 }
 
-func listenAndServe(ctx context.Context, logger *zap.Logger) {
+func listenAndServe(ctx context.Context, logger *zap.Logger, app app.ExampleApp) {
 	// Create a listener on TCP port
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%v", config.C.Server.GRPCPort))
 	if err != nil {
@@ -58,7 +61,7 @@ func listenAndServe(ctx context.Context, logger *zap.Logger) {
 	// Create a gRPC server instance
 	grpcServer := grpc.NewServer()
 	// Register our service with the gRPC server
-	example.RegisterExampleServiceServer(grpcServer, &ExampleController{})
+	example.RegisterExampleServiceServer(grpcServer, &ExampleController{logger: logger, app: app})
 	// TODO: register more service here
 
 	// Serve gRPC server
@@ -83,9 +86,9 @@ func listenAndServe(ctx context.Context, logger *zap.Logger) {
 		logger.Fatal(err.Error())
 	}
 
-	gwmux := runtime.NewServeMux()
+	gwMux := runtime.NewServeMux()
 	// Register service handlers
-	err = example.RegisterExampleServiceHandler(ctx, gwmux, conn)
+	err = example.RegisterExampleServiceHandler(ctx, gwMux, conn)
 	if err != nil {
 		logger.Fatal(err.Error())
 	}
@@ -93,7 +96,7 @@ func listenAndServe(ctx context.Context, logger *zap.Logger) {
 
 	gwServer := &http.Server{
 		Addr:    fmt.Sprintf(":%v", config.C.Server.HTTPPort),
-		Handler: gwmux,
+		Handler: gwMux,
 	}
 
 	logger.Info(fmt.Sprintf("Serving gRPC-Gateway on port %v", config.C.Server.HTTPPort))
